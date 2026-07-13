@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Task Planner</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="hero">
+        <h1>Task Planner</h1>
+        <p>Organizza task, clienti, timer e report in un'unica dashboard minimale.</p>
+      </section>
+
+      <section class="app-tabs" aria-label="Sezioni app">
+        <button type="button" class="app-tab active" data-tab="create">Nuovo Task</button>
+        <button type="button" class="app-tab" data-tab="list">Elenco Task</button>
+        <button type="button" class="app-tab" data-tab="report">Report Tempi</button>
+      </section>
+
+      <section class="composer panel active" data-panel="create" data-separator-style="label">
+        <div class="micro-section-title new-task-section-title">AGGIUNGI TASK</div>
+        <div class="micro-section-divider new-task-divider"></div>
+        <details class="short-guide">
+          <summary>Guida breve</summary>
+          <ol>
+            <li>Inserisci il tuo task nel 1° riquadro.</li>
+            <li>Nella descrizione puoi inserire una frase intera che descriva l’attività da fare oppure, se vuoi creare dei sub-task, puoi separare le voci con una virgola e questo ti creerà dei sub-task.</li>
+            <li>Promemoria: puoi inserire una data come promemoria. Ti verrà inviato un avviso alla data e ora indicata.</li>
+            <li>Scadenza: inserisci la data di scadenza del task.</li>
+            <li>Priorità: inserisci una priorità fra Alta, Media o Bassa.</li>
+            <li>Tipo: puoi scegliere se l’attività è Personale o Cliente.</li>
+            <li>Se hai scelto Personale, una volta aggiunti tutti i campi puoi cliccare su Aggiungi task.</li>
+            <li>Se hai scelto Cliente, dovrai aggiungere anche Cliente (seleziona nome cliente) e Assegnato a (scrivi la persona assegnataria del task).</li>
+            <li>Se dal dropdown Cliente non vedi il nome, aggiungi un nuovo cliente nella sezione Gestione cliente.</li>
+          </ol>
+        </details>
+        <textarea id="taskInput" rows="2" placeholder="Aggiungi un nuovo task..."></textarea>
+        <textarea id="descriptionInput" rows="2" placeholder="Descrizione (opzionale)... per aggiungere micro-task separa con virgole ogni micro-task"></textarea>
+        <label class="reminder-field">
+          <span>Promemoria</span>
+          <input id="reminderInput" type="datetime-local" />
+        </label>
+        <label class="due-field">
+          <span>Scadenza</span>
+          <input id="dueDateInput" type="datetime-local" />
+        </label>
+        <label class="priority-field">
+          <span>Priorità</span>
+          <select id="priorityInput">
+            <option value="low">Bassa</option>
+            <option value="medium" selected>Media</option>
+            <option value="high">Alta</option>
+          </select>
+        </label>
+        <label class="type-field">
+          <span>Tipo</span>
+          <select id="typeInput">
+            <option value="personale" selected>Personale</option>
+            <option value="cliente">Cliente</option>
+          </select>
+        </label>
+        <div id="clientField" class="client-field" hidden>
+          <span>Cliente</span>
+          <select id="clientSelect"></select>
+        </div>
+        <label id="assigneeField" class="assignee-field" hidden>
+          <span>Assegnato a</span>
+          <input id="assigneeInput" type="text" placeholder="Nome persona assegnata" />
+        </label>
+        <div id="clientSectionTitle" class="micro-section-title client-section-title" hidden>Gestione cliente</div>
+        <div id="clientAddDivider" class="client-add-divider" hidden></div>
+        <div id="clientAddBox" class="client-add" hidden>
+          <input id="clientNameInput" type="text" placeholder="Nuovo cliente" />
+          <button id="addClientButton" class="secondary client-action-btn" type="button">Aggiungi cliente</button>
+          <div class="client-csv-actions">
+            <button id="exportClientsCsvButton" class="secondary client-action-btn" type="button">Esporta clienti CSV</button>
+            <button id="importClientsCsvButton" class="secondary client-action-btn" type="button">Importa clienti CSV</button>
+          </div>
+          <input id="importClientsCsvInput" type="file" accept=".csv,text/csv" hidden />
+        </div>
+        <div class="composer-actions">
+          <button id="addButton" type="button">Aggiungi task</button>
+          <button id="clearFieldsButton" class="secondary" type="button">Cancella campi</button>
+          <button id="cancelEditButton" class="secondary" type="button" hidden>Annulla</button>
+        </div>
+      </section>
+
+      <section class="panel" data-panel="list">
+      <section class="task-overview" aria-label="Riepilogo task">
+        <article class="task-overview-card total">
+          <span>Task Totali</span>
+          <strong id="overviewTotal">0</strong>
+        </article>
+        <article class="task-overview-card completed">
+          <span>Completati</span>
+          <strong id="overviewCompleted">0</strong>
+        </article>
+        <article class="task-overview-card urgent">
+          <span>Scaduti</span>
+          <strong id="overviewUrgent">0</strong>
+        </article>
+        <article class="task-overview-card warning">
+          <span>In Scadenza</span>
+          <strong id="overviewWarning">0</strong>
+        </article>
+        <article class="task-overview-card pending">
+          <span>Da fare</span>
+          <strong id="overviewPending">0</strong>
+        </article>
+      </section>
+
+      <div class="micro-section-title new-task-section-title list-section-title">ELENCO TASK</div>
+      <div class="micro-section-divider list-section-divider"></div>
+
+      <section class="toolbar list-toolbar">
+        <input id="searchInput" type="text" placeholder="Cerca task..." />
+        <div class="filters" role="tablist" aria-label="Filtri missioni">
+          <button type="button" class="filter active" data-filter="all">Tutti</button>
+          <button type="button" class="filter" data-filter="pending">Da fare</button>
+          <button type="button" class="filter" data-filter="warning">In scadenza</button>
+          <button type="button" class="filter" data-filter="urgent">Scaduti</button>
+          <button type="button" class="filter" data-filter="completed">Completati</button>
+        </div>
+        <div class="toolbar-actions">
+          <label class="sort-field">
+            <span>Ordina</span>
+            <select id="sortSelect">
+              <option value="recent">Più recenti</option>
+              <option value="oldest">Più vecchie</option>
+              <option value="priority">Priorità</option>
+              <option value="due" selected>In scadenza</option>
+            </select>
+          </label>
+          <button id="clearCompletedButton" class="secondary" type="button">Svuota completati</button>
+          <button id="exportButton" class="secondary" type="button">Esporta</button>
+          <button id="importButton" class="secondary" type="button">Importa</button>
+          <input id="importInput" type="file" accept="application/json" hidden />
+        </div>
+      </section>
+
+      <ul id="taskList" class="list"></ul>
+      </section>
+
+      <section class="panel report-panel" data-panel="report">
+        <div class="report-summary">
+          <div class="report-kpi">
+            <span class="report-label">Tempo Totale</span>
+            <strong id="reportTotalTime">00:00:00</strong>
+          </div>
+          <div class="report-kpi">
+            <span class="report-label">Task Tracciati</span>
+            <strong id="reportTrackedTasks">0</strong>
+          </div>
+        </div>
+        <div class="report-filters">
+          <label class="report-filter-field">
+            <span>Cliente</span>
+            <select id="reportClientFilter">
+              <option value="all">Tutti i clienti</option>
+            </select>
+          </label>
+          <label class="report-filter-field">
+            <span>Dal</span>
+            <input id="reportDateFromFilter" type="date" />
+          </label>
+          <label class="report-filter-field">
+            <span>Al</span>
+            <input id="reportDateToFilter" type="date" />
+          </label>
+          <button id="reportClearFiltersButton" class="secondary" type="button">Pulisci filtri</button>
+        </div>
+        <div class="report-actions">
+          <button id="reportExportCsvButton" class="secondary" type="button">Esporta CSV</button>
+          <button id="reportExportXlsxButton" class="secondary" type="button">Esporta XLSX</button>
+        </div>
+        <div id="reportByClient" class="report-groups"></div>
+      </section>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
