@@ -45,6 +45,8 @@ const overviewWarning = document.getElementById('overviewWarning');
 const overviewPending = document.getElementById('overviewPending');
 const appTabs = Array.from(document.querySelectorAll('.app-tab'));
 const panels = Array.from(document.querySelectorAll('.panel'));
+const CLOUD_CLIENTS_API_ENDPOINT = '/api/clients';
+const IS_LOCAL_ENV = ['localhost', '127.0.0.1'].includes(window.location.hostname);
 
 let tasks = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]').map(normalizeTask);
 let clients = JSON.parse(localStorage.getItem(CLIENTS_STORAGE_KEY) || '[]').filter(Boolean);
@@ -772,6 +774,56 @@ function saveClients() {
   localStorage.setItem(CLIENTS_STORAGE_KEY, JSON.stringify(clients));
 }
 
+function showCloudSaveFailedAlert() {
+  window.alert('Salvataggio cloud fallito, esporta ora backup JSON/CSV');
+}
+
+async function requestCloudClients(method = 'GET', payload) {
+  const options = {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  };
+
+  if (payload !== undefined) {
+    options.body = JSON.stringify(payload);
+  }
+
+  const response = await fetch(CLOUD_CLIENTS_API_ENDPOINT, options);
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || 'Errore API clients');
+  }
+
+  return response.json();
+}
+
+async function fetchCloudClientNames() {
+  const data = await requestCloudClients('GET');
+  return normalizeClientNameList(Array.isArray(data.clients) ? data.clients : []);
+}
+
+async function upsertCloudClientNames(names) {
+  const normalized = normalizeClientNameList(names);
+  const data = await requestCloudClients('POST', { names: normalized });
+  return normalizeClientNameList(Array.isArray(data.clients) ? data.clients : []);
+}
+
+async function syncClientsFromCloudOnStart() {
+  if (IS_LOCAL_ENV) return;
+
+  try {
+    const selected = clientSelect.value || '';
+    const cloudNames = await fetchCloudClientNames();
+    clients = cloudNames;
+    saveClients();
+    renderClientOptions(selected);
+  } catch (error) {
+    console.error('Errore caricamento clients cloud:', error);
+  }
+}
+
 function renderClientOptions(selectedName = '') {
   clientSelect.innerHTML = '';
 
@@ -804,13 +856,24 @@ function renderClientOptions(selectedName = '') {
   }
 }
 
-function addClient() {
+async function addClient() {
   const name = clientNameInput.value.trim();
   if (!name) return;
 
-  if (!clients.includes(name)) {
-    clients.push(name);
-    saveClients();
+  if (IS_LOCAL_ENV) {
+    if (!clients.includes(name)) {
+      clients.push(name);
+      saveClients();
+    }
+  } else {
+    try {
+      clients = await upsertCloudClientNames([...clients, name]);
+      saveClients();
+    } catch (error) {
+      console.error('Errore salvataggio client cloud:', error);
+      showCloudSaveFailedAlert();
+      return;
+    }
   }
 
   clientNameInput.value = '';
@@ -842,15 +905,27 @@ function parseClientsCsv(csvText) {
   return normalizeClientNameList(String(csvText || '').split(/[,\n\r]+/g));
 }
 
-function importClientsCsvFromText(csvText) {
+async function importClientsCsvFromText(csvText) {
   const importedNames = parseClientsCsv(csvText);
   if (!importedNames.length) {
     window.alert('CSV clienti non valido o vuoto.');
     return;
   }
 
-  clients = normalizeClientNameList([...clients, ...importedNames]);
-  saveClients();
+  if (IS_LOCAL_ENV) {
+    clients = normalizeClientNameList([...clients, ...importedNames]);
+    saveClients();
+  } else {
+    try {
+      clients = await upsertCloudClientNames([...clients, ...importedNames]);
+      saveClients();
+    } catch (error) {
+      console.error('Errore import clients cloud:', error);
+      showCloudSaveFailedAlert();
+      return;
+    }
+  }
+
   renderClientOptions(clientSelect.value || '');
   if (typeInput.value === 'cliente') {
     clientSelect.disabled = false;
@@ -1217,9 +1292,9 @@ importClientsCsvInput.addEventListener('change', (event) => {
   if (!file) return;
 
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
     try {
-      importClientsCsvFromText(reader.result);
+      await importClientsCsvFromText(reader.result);
     } finally {
       importClientsCsvInput.value = '';
     }
@@ -1349,6 +1424,7 @@ updateClientFieldVisibility();
 setActiveTab('create');
 renderTasks();
 renderTimeReport();
+syncClientsFromCloudOnStart();
 
 setInterval(() => {
   if (tasks.some((task) => (task.reminder && !task.done) || task.timerStartedAt)) {
