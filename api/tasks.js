@@ -193,6 +193,24 @@ async function createTask(config, rawTask) {
   return fetchAllTasks(config);
 }
 
+function parseRequestBody(rawBody) {
+  if (rawBody === null || rawBody === undefined || rawBody === '') {
+    return {};
+  }
+
+  if (typeof rawBody === 'string') {
+    const trimmed = rawBody.trim();
+    if (!trimmed) return {};
+    return JSON.parse(trimmed);
+  }
+
+  if (typeof rawBody === 'object') {
+    return rawBody;
+  }
+
+  return {};
+}
+
 function buildTaskMutationPayload(task, { partial = false } = {}) {
   const source = task && typeof task === 'object' ? task : {};
 
@@ -302,7 +320,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+      const body = parseRequestBody(req.body);
       const taskPayload = body.task && typeof body.task === 'object' ? body.task : body;
       const tasks = await createTask(config, taskPayload);
       res.status(200).json({ tasks });
@@ -310,7 +328,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PATCH') {
-      const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+      const body = parseRequestBody(req.body);
       const taskPayload = body.task && typeof body.task === 'object' ? body.task : body;
       const taskId = String(taskPayload.id || req.query.id || '').trim();
 
@@ -325,7 +343,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'DELETE') {
-      const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+      const body = parseRequestBody(req.body);
       const taskId = String(body.id || req.query.id || '').trim();
 
       if (!isUuid(taskId)) {
