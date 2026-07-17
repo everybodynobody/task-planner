@@ -193,6 +193,100 @@ async function createTask(config, rawTask) {
   return fetchAllTasks(config);
 }
 
+function buildTaskMutationPayload(task, { partial = false } = {}) {
+  const source = task && typeof task === 'object' ? task : {};
+
+  const has = (key) => Object.prototype.hasOwnProperty.call(source, key);
+  const payload = {};
+
+  if (!partial || has('text')) payload.text = String(source.text || '').trim();
+  if (!partial || has('description')) payload.description = String(source.description || '');
+  if (!partial || has('done')) payload.done = Boolean(source.done);
+  if (!partial || has('trackedMs')) payload.tracked_ms = Number(source.trackedMs) || 0;
+  if (!partial || has('timerStartedAt')) payload.timer_started_at = toIsoOrNull(source.timerStartedAt);
+  if (!partial || has('reminder')) payload.reminder = toIsoOrNull(source.reminder);
+  if (!partial || has('dueDate')) payload.due_date = toIsoOrNull(source.dueDate);
+  if (!partial || has('priority')) payload.priority = ['low', 'medium', 'high'].includes(source.priority) ? source.priority : 'medium';
+  if (!partial || has('type')) payload.type = ['personale', 'cliente'].includes(source.type) ? source.type : 'personale';
+  if (!partial || has('clientName')) payload.client_name = String(source.clientName || '');
+  if (!partial || has('assignee')) payload.assignee = String(source.assignee || '');
+
+  if (!partial || has('createdAt')) {
+    payload.created_at = toIsoOrNull(source.createdAt) || new Date().toISOString();
+  }
+
+  if ((!partial || has('text')) && !payload.text) {
+    throw new Error('Il campo task text è obbligatorio.');
+  }
+
+  return payload;
+}
+
+async function replaceSubtasksForTask(config, taskId, rawSubtasks) {
+  await fetchJsonOrThrow(
+    `${config.supabaseUrl}/rest/v1/subtasks?task_id=eq.${taskId}`,
+    {
+      method: 'DELETE',
+      headers: {
+        ...getHeaders(config.secretKey),
+        Prefer: 'return=minimal',
+      },
+    },
+  );
+
+  const subtasks = normalizeSubtasks(rawSubtasks, taskId);
+  if (!subtasks.length) return;
+
+  await fetchJsonOrThrow(
+    `${config.supabaseUrl}/rest/v1/subtasks`,
+    {
+      method: 'POST',
+      headers: {
+        ...getHeaders(config.secretKey, true),
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify(subtasks),
+    },
+  );
+}
+
+async function updateTask(config, taskId, rawTask) {
+  const payload = buildTaskMutationPayload(rawTask, { partial: true });
+
+  await fetchJsonOrThrow(
+    `${config.supabaseUrl}/rest/v1/tasks?id=eq.${taskId}`,
+    {
+      method: 'PATCH',
+      headers: {
+        ...getHeaders(config.secretKey, true),
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (rawTask && Object.prototype.hasOwnProperty.call(rawTask, 'subtasks')) {
+    await replaceSubtasksForTask(config, taskId, rawTask.subtasks);
+  }
+
+  return fetchAllTasks(config);
+}
+
+async function deleteTask(config, taskId) {
+  await fetchJsonOrThrow(
+    `${config.supabaseUrl}/rest/v1/tasks?id=eq.${taskId}`,
+    {
+      method: 'DELETE',
+      headers: {
+        ...getHeaders(config.secretKey),
+        Prefer: 'return=minimal',
+      },
+    },
+  );
+
+  return fetchAllTasks(config);
+}
+
 export default async function handler(req, res) {
   const config = getSupabaseConfig();
   if (!config) {
@@ -215,7 +309,36 @@ export default async function handler(req, res) {
       return;
     }
 
-    res.setHeader('Allow', 'GET, POST');
+    if (req.method === 'PATCH') {
+      const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+      const taskPayload = body.task && typeof body.task === 'object' ? body.task : body;
+      const taskId = String(taskPayload.id || req.query.id || '').trim();
+
+      if (!isUuid(taskId)) {
+        res.status(400).json({ error: 'ID task non valido per update.' });
+        return;
+      }
+
+      const tasks = await updateTask(config, taskId, taskPayload);
+      res.status(200).json({ tasks });
+      return;
+    }
+
+    if (req.method === 'DELETE') {
+      const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+      const taskId = String(body.id || req.query.id || '').trim();
+
+      if (!isUuid(taskId)) {
+        res.status(400).json({ error: 'ID task non valido per delete.' });
+        return;
+      }
+
+      const tasks = await deleteTask(config, taskId);
+      res.status(200).json({ tasks });
+      return;
+    }
+
+    res.setHeader('Allow', 'GET, POST, PATCH, DELETE');
     res.status(405).json({ error: 'Metodo non supportato.' });
   } catch (error) {
     res.status(500).json({ error: error.message || 'Errore server.' });
