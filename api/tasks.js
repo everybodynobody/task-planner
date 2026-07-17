@@ -65,7 +65,15 @@ async function fetchJsonOrThrow(url, options) {
     const text = await response.text();
     throw new Error(text || 'Errore richiesta Supabase');
   }
-  return response.json();
+
+  const text = await response.text();
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 function normalizeSubtasks(rawSubtasks, taskId = null) {
