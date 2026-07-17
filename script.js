@@ -799,6 +799,27 @@ async function requestCloudClients(method = 'GET', payload) {
   return response.json();
 }
 
+async function requestCloudTasks(method = 'GET', payload) {
+  const options = {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  };
+
+  if (payload !== undefined) {
+    options.body = JSON.stringify(payload);
+  }
+
+  const response = await fetch('/api/tasks', options);
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || 'Errore API tasks');
+  }
+
+  return response.json();
+}
+
 async function fetchCloudClientNames() {
   const data = await requestCloudClients('GET');
   return normalizeClientNameList(Array.isArray(data.clients) ? data.clients : []);
@@ -821,6 +842,22 @@ async function syncClientsFromCloudOnStart() {
     renderClientOptions(selected);
   } catch (error) {
     console.error('Errore caricamento clients cloud:', error);
+  }
+}
+
+async function syncTasksFromCloudOnStart() {
+  if (IS_LOCAL_ENV) return;
+
+  try {
+    const data = await requestCloudTasks('GET');
+    tasks = Array.isArray(data.tasks)
+      ? data.tasks.map(normalizeTask)
+      : [];
+    saveTasks();
+    renderTasks();
+    renderTimeReport();
+  } catch (error) {
+    console.error('Errore caricamento tasks cloud:', error);
   }
 }
 
@@ -1425,6 +1462,7 @@ setActiveTab('create');
 renderTasks();
 renderTimeReport();
 syncClientsFromCloudOnStart();
+syncTasksFromCloudOnStart();
 
 setInterval(() => {
   if (tasks.some((task) => (task.reminder && !task.done) || task.timerStartedAt)) {
