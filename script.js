@@ -453,10 +453,41 @@ function downloadTimeReportXlsx() {
   downloadBlob(buildReportXlsxWorkbook(entries), 'report-tempi.xlsx');
 }
 
-function stopTaskTimer(taskId) {
+async function stopTaskTimer(taskId) {
   const now = Date.now();
-  tasks = tasks.map((task) => {
-    if (task.id !== taskId || !task.timerStartedAt) return task;
+  const currentTask = tasks.find((task) => task.id === taskId);
+  if (!currentTask || !currentTask.timerStartedAt) return;
+
+  const elapsed = Math.max(0, now - Number(currentTask.timerStartedAt));
+  const updatedTask = {
+    ...currentTask,
+    trackedMs: (Number(currentTask.trackedMs) || 0) + elapsed,
+    timerStartedAt: null,
+  };
+
+  if (IS_LOCAL_ENV) {
+    tasks = tasks.map((task) => task.id === taskId ? updatedTask : task);
+  } else {
+    try {
+      await patchTaskInCloud(updatedTask);
+    } catch (error) {
+      console.error('Errore stop timer cloud:', error);
+      showCloudSaveFailedAlert();
+      return;
+    }
+  }
+
+  saveTasks();
+  renderTasks();
+}
+
+async function startTaskTimer(taskId) {
+  const now = Date.now();
+  const targetTask = tasks.find((task) => task.id === taskId);
+  if (!targetTask || targetTask.done || targetTask.timerStartedAt) return;
+
+  const currentlyRunning = tasks.filter((task) => task.id !== taskId && task.timerStartedAt);
+  const stoppedTasks = currentlyRunning.map((task) => {
     const elapsed = Math.max(0, now - Number(task.timerStartedAt));
     return {
       ...task,
@@ -464,44 +495,39 @@ function stopTaskTimer(taskId) {
       timerStartedAt: null,
     };
   });
+
+  const startedTask = {
+    ...targetTask,
+    timerStartedAt: String(now),
+  };
+
+  if (IS_LOCAL_ENV) {
+    const updatesById = new Map([...stoppedTasks, startedTask].map((task) => [task.id, task]));
+    tasks = tasks.map((task) => updatesById.get(task.id) || task);
+  } else {
+    try {
+      for (const taskToStop of stoppedTasks) {
+        await patchTaskInCloud(taskToStop);
+      }
+      await patchTaskInCloud(startedTask);
+    } catch (error) {
+      console.error('Errore start timer cloud:', error);
+      showCloudSaveFailedAlert();
+      return;
+    }
+  }
+
   saveTasks();
   renderTasks();
 }
 
-function startTaskTimer(taskId) {
-  const now = Date.now();
-  tasks = tasks.map((task) => {
-    if (task.id === taskId) {
-      if (task.done || task.timerStartedAt) return task;
-      return {
-        ...task,
-        timerStartedAt: String(now),
-      };
-    }
-
-    // Keep one active timer at a time to avoid overlapping work logs.
-    if (task.timerStartedAt) {
-      const elapsed = Math.max(0, now - Number(task.timerStartedAt));
-      return {
-        ...task,
-        trackedMs: (Number(task.trackedMs) || 0) + elapsed,
-        timerStartedAt: null,
-      };
-    }
-
-    return task;
-  });
-  saveTasks();
-  renderTasks();
-}
-
-function toggleTaskTimer(taskId) {
+async function toggleTaskTimer(taskId) {
   const task = tasks.find((candidate) => candidate.id === taskId);
   if (!task) return;
   if (task.timerStartedAt) {
-    stopTaskTimer(taskId);
+    await stopTaskTimer(taskId);
   } else {
-    startTaskTimer(taskId);
+    await startTaskTimer(taskId);
   }
 }
 
@@ -820,6 +846,22 @@ async function requestCloudTasks(method = 'GET', payload) {
   return response.json();
 }
 
+async function patchTaskInCloud(taskPayload) {
+  const data = await requestCloudTasks('PATCH', { task: taskPayload });
+  tasks = Array.isArray(data.tasks)
+    ? data.tasks.map(normalizeTask)
+    : tasks;
+  saveTasks();
+}
+
+async function deleteTaskInCloud(taskId) {
+  const data = await requestCloudTasks('DELETE', { id: taskId });
+  tasks = Array.isArray(data.tasks)
+    ? data.tasks.map(normalizeTask)
+    : tasks;
+  saveTasks();
+}
+
 async function fetchCloudClientNames() {
   const data = await requestCloudClients('GET');
   return normalizeClientNameList(Array.isArray(data.clients) ? data.clients : []);
@@ -995,20 +1037,36 @@ async function saveCurrentTask() {
     const confirmed = window.confirm('Salvare le modifiche a questa missione?');
     if (!confirmed) return;
 
-    tasks = tasks.map((task) => task.id === editingId
-      ? {
-          ...task,
-          text,
-          description,
-          subtasks: parseSubtasksFromDescription(description, task.subtasks || []),
-          reminder: reminderValue,
-          dueDate: dueDateValue,
-          priority: priorityValue,
-          type: typeValue,
-          clientName: clientNameValue,
-          assignee: assigneeValue,
-        }
-      : task);
+    const currentTask = tasks.find((task) => task.id === editingId);
+    if (!currentTask) return;
+
+    const updatedTask = {
+      ...currentTask,
+      text,
+      description,
+      subtasks: parseSubtasksFromDescription(description, currentTask.subtasks || []),
+      reminder: reminderValue,
+      dueDate: dueDateValue,
+      priority: priorityValue,
+      type: typeValue,
+      clientName: clientNameValue,
+      assignee: assigneeValue,
+    };
+
+    if (IS_LOCAL_ENV) {
+      tasks = tasks.map((task) => task.id === editingId
+        ? updatedTask
+        : task);
+    } else {
+      try {
+        await patchTaskInCloud(updatedTask);
+      } catch (error) {
+        console.error('Errore modifica task cloud:', error);
+        showCloudSaveFailedAlert();
+        return;
+      }
+    }
+
     saveTasks();
     cancelEditing();
     renderTasks();
@@ -1137,25 +1195,36 @@ function renderTasks() {
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.checked = task.done;
-    checkbox.addEventListener('change', (event) => {
+    checkbox.addEventListener('change', async (event) => {
       event.stopPropagation();
       const now = Date.now();
-      tasks = tasks.map((taskItem) => {
-        if (taskItem.id !== task.id) return taskItem;
-        if (checkbox.checked && taskItem.timerStartedAt) {
-          const elapsed = Math.max(0, now - Number(taskItem.timerStartedAt));
-          return {
+      const taskItem = tasks.find((candidate) => candidate.id === task.id);
+      if (!taskItem) return;
+
+      const updatedTask = (checkbox.checked && taskItem.timerStartedAt)
+        ? {
             ...taskItem,
             done: true,
-            trackedMs: (Number(taskItem.trackedMs) || 0) + elapsed,
+            trackedMs: (Number(taskItem.trackedMs) || 0) + Math.max(0, now - Number(taskItem.timerStartedAt)),
             timerStartedAt: null,
+          }
+        : {
+            ...taskItem,
+            done: checkbox.checked,
           };
+
+      if (IS_LOCAL_ENV) {
+        tasks = tasks.map((item) => item.id === task.id ? updatedTask : item);
+      } else {
+        try {
+          await patchTaskInCloud(updatedTask);
+        } catch (error) {
+          console.error('Errore update stato task cloud:', error);
+          showCloudSaveFailedAlert();
+          return;
         }
-        return {
-          ...taskItem,
-          done: checkbox.checked,
-        };
-      });
+      }
+
       saveTasks();
       renderTasks();
     });
@@ -1241,18 +1310,28 @@ function renderTasks() {
     timerButton.className = 'timer';
     timerButton.textContent = task.timerStartedAt ? 'Stop timer' : 'Start timer';
     timerButton.disabled = task.done;
-    timerButton.addEventListener('click', (event) => {
+    timerButton.addEventListener('click', async (event) => {
       event.stopPropagation();
       if (task.done) return;
-      toggleTaskTimer(task.id);
+      await toggleTaskTimer(task.id);
     });
 
     const deleteButton = document.createElement('button');
     deleteButton.className = 'delete';
     deleteButton.textContent = 'Elimina';
-    deleteButton.addEventListener('click', (event) => {
+    deleteButton.addEventListener('click', async (event) => {
       event.stopPropagation();
-      tasks = tasks.filter((t) => t.id !== task.id);
+      if (IS_LOCAL_ENV) {
+        tasks = tasks.filter((t) => t.id !== task.id);
+      } else {
+        try {
+          await deleteTaskInCloud(task.id);
+        } catch (error) {
+          console.error('Errore delete task cloud:', error);
+          showCloudSaveFailedAlert();
+          return;
+        }
+      }
       saveTasks();
       renderTasks();
     });
@@ -1278,16 +1357,32 @@ function renderTasks() {
           subtaskCheckbox.addEventListener('click', (event) => {
             event.stopPropagation();
           });
-          subtaskCheckbox.addEventListener('change', (event) => {
+          subtaskCheckbox.addEventListener('change', async (event) => {
             event.stopPropagation();
-            tasks = tasks.map((taskItem) => taskItem.id === task.id
-              ? {
-                  ...taskItem,
-                  subtasks: taskItem.subtasks.map((item) => item.id === subtask.id
-                    ? { ...item, done: subtaskCheckbox.checked }
-                    : item),
-                }
-              : taskItem);
+            const taskItem = tasks.find((candidate) => candidate.id === task.id);
+            if (!taskItem) return;
+
+            const updatedTask = {
+              ...taskItem,
+              subtasks: taskItem.subtasks.map((item) => item.id === subtask.id
+                ? { ...item, done: subtaskCheckbox.checked }
+                : item),
+            };
+
+            if (IS_LOCAL_ENV) {
+              tasks = tasks.map((item) => item.id === task.id
+                ? updatedTask
+                : item);
+            } else {
+              try {
+                await patchTaskInCloud(updatedTask);
+              } catch (error) {
+                console.error('Errore update subtask cloud:', error);
+                showCloudSaveFailedAlert();
+                return;
+              }
+            }
+
             saveTasks();
             renderTasks();
           });
