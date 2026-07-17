@@ -978,7 +978,7 @@ function updateClientFieldVisibility() {
   clientAddBox.hidden = !isClient;
 }
 
-function saveCurrentTask() {
+async function saveCurrentTask() {
   const text = taskInput.value.trim();
   if (!text) return;
 
@@ -1009,23 +1009,44 @@ function saveCurrentTask() {
           assignee: assigneeValue,
         }
       : task);
+    saveTasks();
+    cancelEditing();
+    renderTasks();
+    renderTimeReport();
+    taskInput.focus();
+    return;
+  }
+
+  const newTask = {
+    id: Date.now().toString(),
+    text,
+    description,
+    subtasks: subtasksValue,
+    done: false,
+    trackedMs: 0,
+    timerStartedAt: null,
+    reminder: reminderValue,
+    dueDate: dueDateValue,
+    priority: priorityValue,
+    type: typeValue,
+    clientName: clientNameValue,
+    assignee: assigneeValue,
+    createdAt: Date.now().toString(),
+  };
+
+  if (IS_LOCAL_ENV) {
+    tasks.unshift(newTask);
   } else {
-    tasks.unshift({
-      id: Date.now().toString(),
-      text,
-      description,
-      subtasks: subtasksValue,
-      done: false,
-      trackedMs: 0,
-      timerStartedAt: null,
-      reminder: reminderValue,
-      dueDate: dueDateValue,
-      priority: priorityValue,
-      type: typeValue,
-      clientName: clientNameValue,
-      assignee: assigneeValue,
-      createdAt: Date.now().toString(),
-    });
+    try {
+      const data = await requestCloudTasks('POST', { task: newTask });
+      tasks = Array.isArray(data.tasks)
+        ? data.tasks.map(normalizeTask)
+        : tasks;
+    } catch (error) {
+      console.error('Errore salvataggio task cloud:', error);
+      showCloudSaveFailedAlert();
+      return;
+    }
   }
 
   saveTasks();
