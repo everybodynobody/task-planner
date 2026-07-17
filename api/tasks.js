@@ -193,22 +193,48 @@ async function createTask(config, rawTask) {
   return fetchAllTasks(config);
 }
 
-function parseRequestBody(rawBody) {
-  if (rawBody === null || rawBody === undefined || rawBody === '') {
-    return {};
+async function parseRequestBody(req) {
+  const rawBody = req.body;
+
+  if (rawBody && typeof rawBody === 'object' && !Buffer.isBuffer(rawBody)) {
+    return rawBody;
   }
 
   if (typeof rawBody === 'string') {
     const trimmed = rawBody.trim();
     if (!trimmed) return {};
-    return JSON.parse(trimmed);
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return {};
+    }
   }
 
-  if (typeof rawBody === 'object') {
-    return rawBody;
+  if (Buffer.isBuffer(rawBody)) {
+    const text = rawBody.toString('utf8').trim();
+    if (!text) return {};
+    try {
+      return JSON.parse(text);
+    } catch {
+      return {};
+    }
   }
 
-  return {};
+  const chunks = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.from(chunk));
+  }
+
+  if (!chunks.length) return {};
+
+  const text = Buffer.concat(chunks).toString('utf8').trim();
+  if (!text) return {};
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
 }
 
 function buildTaskMutationPayload(task, { partial = false } = {}) {
@@ -320,7 +346,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      const body = parseRequestBody(req.body);
+      const body = await parseRequestBody(req);
       const taskPayload = body.task && typeof body.task === 'object' ? body.task : body;
       const tasks = await createTask(config, taskPayload);
       res.status(200).json({ tasks });
@@ -328,7 +354,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PATCH') {
-      const body = parseRequestBody(req.body);
+      const body = await parseRequestBody(req);
       const taskPayload = body.task && typeof body.task === 'object' ? body.task : body;
       const taskId = String(taskPayload.id || req.query.id || '').trim();
 
@@ -343,7 +369,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'DELETE') {
-      const body = parseRequestBody(req.body);
+      const body = await parseRequestBody(req);
       const taskId = String(body.id || req.query.id || '').trim();
 
       if (!isUuid(taskId)) {
