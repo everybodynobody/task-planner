@@ -78,13 +78,21 @@ async function fetchJsonOrThrow(url, options) {
 
 function normalizeSubtasks(rawSubtasks, taskId = null) {
   return (Array.isArray(rawSubtasks) ? rawSubtasks : [])
-    .map((subtask, index) => ({
-      id: isUuid(subtask?.id) ? String(subtask.id) : null,
-      task_id: taskId || null,
-      text: String(subtask?.text || '').trim(),
-      done: Boolean(subtask?.done),
-      position: Number.isFinite(Number(subtask?.position)) ? Number(subtask.position) : index,
-    }))
+    .map((subtask, index) => {
+      const normalized = {
+        task_id: taskId || null,
+        text: String(subtask?.text || '').trim(),
+        done: Boolean(subtask?.done),
+        position: Number.isFinite(Number(subtask?.position)) ? Number(subtask.position) : index,
+      };
+
+      // Let Postgres generate UUID if the incoming id is not a valid UUID.
+      if (isUuid(subtask?.id)) {
+        normalized.id = String(subtask.id);
+      }
+
+      return normalized;
+    })
     .filter((subtask) => subtask.text);
 }
 
@@ -321,7 +329,7 @@ async function updateTask(config, taskId, rawTask) {
     await replaceSubtasksForTask(config, taskId, rawTask.subtasks);
   }
 
-  return fetchAllTasks(config);
+  return { ok: true };
 }
 
 async function deleteTask(config, taskId) {
@@ -336,7 +344,7 @@ async function deleteTask(config, taskId) {
     },
   );
 
-  return fetchAllTasks(config);
+  return { ok: true };
 }
 
 export default async function handler(req, res) {
@@ -372,7 +380,7 @@ export default async function handler(req, res) {
       }
 
       const tasks = await updateTask(config, taskId, taskPayload);
-      res.status(200).json({ tasks });
+      res.status(200).json(tasks);
       return;
     }
 
@@ -386,7 +394,7 @@ export default async function handler(req, res) {
       }
 
       const tasks = await deleteTask(config, taskId);
-      res.status(200).json({ tasks });
+      res.status(200).json(tasks);
       return;
     }
 

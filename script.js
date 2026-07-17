@@ -847,18 +847,16 @@ async function requestCloudTasks(method = 'GET', payload) {
 }
 
 async function patchTaskInCloud(taskPayload) {
-  const data = await requestCloudTasks('PATCH', { task: taskPayload });
-  tasks = Array.isArray(data.tasks)
-    ? data.tasks.map(normalizeTask)
-    : tasks;
+  await requestCloudTasks('PATCH', { task: taskPayload });
+  tasks = tasks.map((task) => task.id === taskPayload.id
+    ? normalizeTask(taskPayload)
+    : task);
   saveTasks();
 }
 
 async function deleteTaskInCloud(taskId) {
-  const data = await requestCloudTasks('DELETE', { id: taskId });
-  tasks = Array.isArray(data.tasks)
-    ? data.tasks.map(normalizeTask)
-    : tasks;
+  await requestCloudTasks('DELETE', { id: taskId });
+  tasks = tasks.filter((task) => task.id !== taskId);
   saveTasks();
 }
 
